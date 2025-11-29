@@ -3,8 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+    <meta name="theme-color" content="#6366f1">
+    <meta name="description" content="Generate exam questions from notes in any language.">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Questo - Smart Question Paper Generator</title>
     
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2995/2995101.png">
+
     <!-- Parsing Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script>
@@ -15,10 +23,10 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
-    <!-- Google Fonts: Inter -->
+    <!-- Google Fonts: Inter & Noto Sans (for broad language support) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans:wght@400;700&display=swap" rel="stylesheet">
 
     <style>
         :root {
@@ -56,7 +64,8 @@
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
         body {
-            font-family: 'Inter', sans-serif;
+            /* Fallback to system fonts for proper rendering of Indic scripts */
+            font-family: 'Inter', 'Noto Sans', system-ui, -apple-system, sans-serif;
             background-color: var(--bg-body);
             color: var(--text-main);
             line-height: 1.6;
@@ -519,11 +528,11 @@
             <div class="form-grid">
                 <div class="input-group">
                     <label class="input-label">Subject</label>
-                    <input type="text" class="input-field" id="subject" placeholder="e.g. History">
+                    <input type="text" class="input-field" id="subject" placeholder="e.g. History or विज्ञान">
                 </div>
                 <div class="input-group">
                     <label class="input-label">Topic / Chapter</label>
-                    <input type="text" class="input-field" id="topic" placeholder="e.g. World War II">
+                    <input type="text" class="input-field" id="topic" placeholder="e.g. World War II or प्रकाश संस्लेशण">
                 </div>
                 <div class="input-group">
                     <label class="input-label">Total Marks</label>
@@ -569,7 +578,7 @@
                 
                 <div style="margin-top: 1rem;">
                     <label class="input-label">Content Preview (Editable)</label>
-                    <textarea class="input-field content-area" id="content-text" placeholder="Or paste your text notes here..."></textarea>
+                    <textarea class="input-field content-area" id="content-text" placeholder="Paste notes in ANY language (Hindi, Telugu, English, etc.)"></textarea>
                 </div>
             </div>
         </div>
@@ -620,6 +629,15 @@
     </div>
 
     <script>
+        /* --- SERVICE WORKER REGISTRATION (PWA) --- */
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js')
+                    .then(reg => console.log('SW registered'))
+                    .catch(err => console.log('SW failed', err));
+            });
+        }
+
         /* --- UTILS --- */
         const $ = (selector) => document.querySelector(selector);
         const $$ = (selector) => document.querySelectorAll(selector);
@@ -629,6 +647,24 @@
             content: '',
             paper: null,
             history: []
+        };
+
+        /* --- LOCALE DATA (Question Templates) --- */
+        const LOCALE_TEMPLATES = {
+            en: { mcq: "Complete the sentence:", short: "Briefly explain:", long: "Discuss in detail:" },
+            es: { mcq: "Completa la frase:", short: "Explique brevemente:", long: "Discuta en detalle:" },
+            fr: { mcq: "Complétez la phrase :", short: "Expliquez brièvement :", long: "Discutez en détail :" },
+            de: { mcq: "Vervollständigen Sie den Satz:", short: "Erklären Sie kurz:", long: "Diskutieren Sie im Detail:" },
+            it: { mcq: "Completa la frase:", short: "Spiega brevemente:", long: "Discuti in dettaglio:" },
+            pt: { mcq: "Complete a frase:", short: "Explique brevemente:", long: "Discuta detalhadamente:" },
+            zh: { mcq: "补充句子：", short: "简要解释：", long: "详细论述：" },
+            ja: { mcq: "次の文を完成させてください：", short: "簡潔に説明してください：", long: "詳しく議論してください：" },
+            ko: { mcq: "다음 문장을 완성하세요:", short: "간단히 설명하세요:", long: "상세히 논의하세요:" },
+            ru: { mcq: "Дополните предложение:", short: "Кратко объясните:", long: "Обсудите подробно:" },
+            hi: { mcq: "वाक्य पूरा करें:", short: "संक्षेप में समझाएं:", long: "विस्तार से चर्चा करें:" },
+            te: { mcq: "వాక్యాన్ని పూర్తి చేయండి:", short: "క్లుప్తంగా వివరించండి:", long: "వివరంగా చర్చించండి:" },
+            ar: { mcq: "أكمل الجملة:", short: "اشرح بإيجاز:", long: "ناقش بالتفصيل:" },
+            default: { mcq: "Complete:", short: "Explain:", long: "Discuss:" }
         };
 
         /* --- ANIMATIONS & TABS --- */
@@ -743,8 +779,33 @@
             }
         }
 
-        /* --- GENERATION LOGIC --- */
-        const STOP_WORDS = new Set(['the','is','in','at','of','on','and','a','to','it','for','with','as','by']);
+        /* --- GENERATION LOGIC WITH MULTI-LANGUAGE SUPPORT --- */
+        
+        // Simple language detector
+        function detectLanguage(text) {
+            const sample = text.substring(0, 1000);
+            
+            // Check Scripts
+            if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(sample)) {
+                if (/[\u3040-\u30ff]/.test(sample)) return 'ja'; // Kana present -> Japanese
+                return 'zh'; // Hanzi only -> Chinese
+            }
+            if (/[\uac00-\ud7af]/.test(sample)) return 'ko';
+            if (/[\u0900-\u097f]/.test(sample)) return 'hi'; // Hindi (Devanagari)
+            if (/[\u0c00-\u0c7f]/.test(sample)) return 'te'; // Telugu
+            if (/[\u0600-\u06ff]/.test(sample)) return 'ar';
+            if (/[\u0400-\u04ff]/.test(sample)) return 'ru';
+            
+            // Heuristics for Latin scripts (Stop words)
+            const words = sample.toLowerCase().split(/\W+/);
+            if (words.includes('le') || words.includes('la') || words.includes('et')) return 'fr';
+            if (words.includes('el') || words.includes('la') || words.includes('y') || words.includes('en')) return 'es';
+            if (words.includes('der') || words.includes('die') || words.includes('das') || words.includes('und')) return 'de';
+            if (words.includes('il') || words.includes('la') || words.includes('di')) return 'it';
+            if (words.includes('o') || words.includes('a') || words.includes('e') || words.includes('do')) return 'pt';
+
+            return 'en'; // Default
+        }
 
         function generateQuestions() {
             const subject = $('#subject').value;
@@ -773,11 +834,14 @@
 
             setTimeout(() => {
                 try {
-                    const questions = processTextToQuestions(text, count, types);
+                    const lang = detectLanguage(text);
+                    console.log("Detected Language:", lang);
+                    
+                    const questions = processTextToQuestions(text, count, types, lang);
                     
                     const paperData = {
                         id: Date.now(),
-                        subject, topic, marks, questions,
+                        subject, topic, marks, questions, lang,
                         timestamp: new Date().toLocaleString()
                     };
 
@@ -789,61 +853,117 @@
                     output.scrollIntoView({ behavior: 'smooth' });
                 } catch(e) {
                     alert(e.message);
+                    console.error(e);
                 } finally {
                     showLoader(false);
                 }
             }, 800);
         }
 
-        function processTextToQuestions(text, count, types) {
+        function processTextToQuestions(text, count, types, lang) {
+            // Clean text
             const cleanText = text.replace(/\s+/g, ' ').trim();
-            const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [];
-            const validSentences = sentences.map(s => s.trim()).filter(s => s.length > 20);
             
-            if (validSentences.length < 3) throw new Error("Not enough content to generate questions.");
+            // --- Advanced Sentence Splitting (Intl.Segmenter) ---
+            let sentences = [];
+            if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+                try {
+                    const segmenter = new Intl.Segmenter(lang, { granularity: 'sentence' });
+                    sentences = Array.from(segmenter.segment(cleanText)).map(x => x.segment.trim());
+                } catch (e) {
+                    // Fallback if lang not supported by Intl
+                    sentences = cleanText.split(/[.!?|。！？]+/).map(s => s.trim());
+                }
+            } else {
+                // Fallback for older browsers
+                sentences = cleanText.match(/[^.!?|。！？]+[.!?|。！？]+/g) || [cleanText];
+            }
+            
+            // Filter short segments
+            const validSentences = sentences.filter(s => s.length > 15);
+            if (validSentences.length < 2) throw new Error("Not enough content. Please provide at least 2-3 detailed sentences.");
 
-            const allWords = cleanText.split(/\W+/).filter(w => w.length > 4 && !STOP_WORDS.has(w.toLowerCase()));
-            const keywords = [...new Set(allWords)];
+            // --- Keyword Extraction (Intl.Segmenter) ---
+            let keywords = [];
+            if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+                try {
+                    const wordSegmenter = new Intl.Segmenter(lang, { granularity: 'word' });
+                    const segments = Array.from(wordSegmenter.segment(cleanText));
+                    
+                    // Filter "word-like" items that are long enough (avoids punctuation and common particles in CJK)
+                    const minLen = ['zh','ja','te','hi'].includes(lang) ? 2 : 4;
+                    keywords = segments
+                        .filter(x => x.isWordLike && x.segment.length >= minLen)
+                        .map(x => x.segment);
+                } catch (e) {
+                    keywords = cleanText.split(/\W+/).filter(w => w.length > 4);
+                }
+            } else {
+                // Fallback splitting
+                keywords = cleanText.split(/\W+/).filter(w => w.length > 4);
+            }
+            
+            // Unique keywords
+            keywords = [...new Set(keywords)];
 
             const questions = [];
             const activeTypes = [];
             if(types.mcq) activeTypes.push('MCQ');
             if(types.short) activeTypes.push('SHORT');
             if(types.long) activeTypes.push('LONG');
+            
+            const templates = LOCALE_TEMPLATES[lang] || LOCALE_TEMPLATES.default;
 
             for(let i=0; i<count; i++) {
                 const type = activeTypes[i % activeTypes.length];
                 const sentence = validSentences[i % validSentences.length];
-                const q = createQuestion(i+1, type, sentence, keywords);
+                const q = createQuestion(i+1, type, sentence, keywords, templates, lang);
                 questions.push(q);
             }
             return questions;
         }
 
-        function createQuestion(id, type, sentence, keywords) {
-            const wordsInSentence = sentence.split(/\W+/);
-            const target = wordsInSentence.find(w => w.length > 5) || wordsInSentence[wordsInSentence.length-1];
+        function createQuestion(id, type, sentence, keywords, templates, lang) {
+            let target = "";
+            
+            // Extract a target word from the sentence itself
+            if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+                 try {
+                     const wordSegmenter = new Intl.Segmenter(lang, { granularity: 'word' });
+                     const words = Array.from(wordSegmenter.segment(sentence)).filter(x => x.isWordLike && x.segment.length >= 2);
+                     target = words.length ? words[Math.floor(Math.random() * words.length)].segment : "it";
+                 } catch (e) {
+                    const words = sentence.split(/\s+/);
+                    target = words.find(w => w.length > 4) || words[0];
+                 }
+            } else {
+                 const words = sentence.split(/\W+/);
+                 target = words.find(w => w.length > 5) || words[words.length-1];
+            }
             
             const q = { id, type, answer: target };
 
             if (type === 'MCQ') {
-                q.text = sentence.replace(target, '__________');
+                // Replace target with underline
+                q.text = `${templates.mcq} "${sentence.replace(target, '__________')}"`;
                 q.marks = 1;
                 const opts = new Set([target]);
-                while(opts.size < 4) {
+                let safety = 0;
+                while(opts.size < 4 && safety < 50) {
                     const rnd = keywords[Math.floor(Math.random() * keywords.length)];
-                    if(rnd) opts.add(rnd);
-                    else opts.add("None of the above"); 
+                    if(rnd && rnd !== target) opts.add(rnd);
+                    safety++;
                 }
                 q.options = Array.from(opts).sort(() => Math.random() - 0.5);
+                q.answer = target;
             } else if (type === 'SHORT') {
-                q.text = `Explain the significance of "${target}" in the context of: "${sentence.substring(0, 30)}..."`;
+                q.text = `${templates.short} "${target}" (${sentence.substring(0, 40)}...)`;
                 q.marks = 3;
                 q.answer = sentence;
             } else {
-                q.text = `Discuss in detail: ${sentence}`;
+                q.text = `${templates.long} "${sentence.substring(0, 80)}..."`;
                 q.marks = 5;
-                q.answer = `Elaborate on ${target}. Reference: ${sentence}`;
+                q.answer = sentence;
             }
             return q;
         }
@@ -936,7 +1056,7 @@
                 el.innerHTML = `
                     <div class="history-info" onclick="restorePaper(${index})">
                         <div class="history-title">${item.subject}</div>
-                        <div class="history-meta">${item.topic} • ${item.questions.length} Qs • ${item.timestamp}</div>
+                        <div class="history-meta">${item.topic} • ${item.questions.length} Qs • ${item.lang.toUpperCase()}</div>
                     </div>
                     <div class="history-actions">
                         <button class="btn-icon-small delete" onclick="deletePaper(${index})">
